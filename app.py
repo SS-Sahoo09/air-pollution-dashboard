@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pickle
 import requests
+import os
 
 # -------------------------
 # PAGE SETTINGS
@@ -20,44 +21,27 @@ st.set_page_config(
 
 st.markdown("# 🌍 India Air Pollution AI Dashboard")
 st.caption("Machine Learning Based Air Quality Monitoring & Prediction System")
-# -------------------------
-# CUSTOM CSS (Professional UI)
-# -------------------------
-
-st.markdown("""
-<style>
-
-.main-title{
-font-size:40px;
-font-weight:700;
-background: linear-gradient(90deg,#00c6ff,#0072ff);
--webkit-background-clip:text;
--webkit-text-fill-color:transparent;
-}
-
-.metric-card{
-background-color: rgba(255,255,255,0.1);
-padding:20px;
-border-radius:15px;
-box-shadow:0px 4px 10px rgba(0,0,0,0.2);
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# st.markdown('<p class="main-title">🌍 India Air Pollution AI Dashboard</p>', unsafe_allow_html=True)
 
 # -------------------------
-# LOAD MODEL
+# SAFE MODEL LOADING (FIXED)
 # -------------------------
 
-model = pickle.load(open("models/aqi_model.pkl","rb"))
+model = None
+
+if os.path.exists("models/aqi_model.pkl"):
+    try:
+        model = pickle.load(open("models/aqi_model.pkl", "rb"))
+    except:
+        model = None
+
+if model is None:
+    st.warning("⚠️ Model not found — using demo prediction")
 
 # -------------------------
 # API KEY
 # -------------------------
 
-API_KEY = "b08c7b2d4f64b8d7a9deb494852fa66e"
+API_KEY = "YOUR_API_KEY_HERE"
 
 # -------------------------
 # CITY DATA
@@ -82,27 +66,29 @@ cities = {
 
 st.sidebar.header("AQI Prediction")
 
-selected_city = st.sidebar.selectbox(
-    "Select City (Search Enabled)",
-    list(cities.keys())
-)
+selected_city = st.sidebar.selectbox("Select City", list(cities.keys()))
 
-pm25 = st.sidebar.number_input("PM2.5",0.0,500.0,50.0,step=1.0)
-pm10 = st.sidebar.number_input("PM10",0.0,500.0,80.0,step=1.0)
-no2 = st.sidebar.number_input("NO2",0.0,200.0,30.0,step=1.0)
-co = st.sidebar.number_input("CO",0.0,10.0,1.0,step=0.1)
-o3 = st.sidebar.number_input("O3",0.0,200.0,20.0,step=1.0)
+pm25 = st.sidebar.number_input("PM2.5",0.0,500.0,50.0)
+pm10 = st.sidebar.number_input("PM10",0.0,500.0,80.0)
+no2 = st.sidebar.number_input("NO2",0.0,200.0,30.0)
+co = st.sidebar.number_input("CO",0.0,10.0,1.0)
+o3 = st.sidebar.number_input("O3",0.0,200.0,20.0)
 
 predict = st.sidebar.button("Predict AQI")
 
 # -------------------------
-# PREDICTION
+# PREDICTION (FIXED)
 # -------------------------
 
 if predict:
-
     input_data = np.array([[pm25,pm10,no2,co,o3]])
-    st.session_state.prediction = model.predict(input_data)[0]
+
+    if model is not None:
+        prediction = model.predict(input_data)[0]
+    else:
+        prediction = np.mean(input_data)
+
+    st.session_state.prediction = prediction
 
 # -------------------------
 # KPI CARDS
@@ -111,7 +97,6 @@ if predict:
 st.subheader("Air Pollution Statistics")
 
 col1,col2,col3 = st.columns(3)
-
 col1.metric("Average AQI India","155")
 col2.metric("Most Polluted City","Delhi")
 col3.metric("Cleanest State","Mizoram")
@@ -125,10 +110,8 @@ if "prediction" in st.session_state:
     prediction = st.session_state.prediction
 
     st.subheader("Prediction Result")
-
     st.success(f"Predicted AQI : {prediction:.2f}")
 
-    # Gauge meter
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=prediction,
@@ -159,41 +142,25 @@ lat,lon = cities[selected_city]
 url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={API_KEY}"
 
 try:
-
     response = requests.get(url).json()
 
     live_aqi = response["list"][0]["main"]["aqi"]
     comp = response["list"][0]["components"]
 
-    aqi_levels = {
-    1:"Good 🟢",
-    2:"Fair 🟡",
-    3:"Moderate 🟠",
-    4:"Poor 🔴",
-    5:"Very Poor 🟣"
-    }
+    levels = {1:"Good 🟢",2:"Fair 🟡",3:"Moderate 🟠",4:"Poor 🔴",5:"Very Poor 🟣"}
 
-    st.info(f"Live AQI for {selected_city}: {aqi_levels[live_aqi]}")
-
-    st.write("### Pollutant Values")
+    st.info(f"Live AQI: {levels[live_aqi]}")
 
     c1,c2,c3 = st.columns(3)
-
-    c1.metric("PM2.5",f"{comp['pm2_5']} µg/m³")
-    c2.metric("PM10",f"{comp['pm10']} µg/m³")
-    c3.metric("NO2",f"{comp['no2']} µg/m³")
-
-    c4,c5 = st.columns(2)
-
-    c4.metric("CO",f"{comp['co']} µg/m³")
-    c5.metric("O3",f"{comp['o3']} µg/m³")
+    c1.metric("PM2.5",comp['pm2_5'])
+    c2.metric("PM10",comp['pm10'])
+    c3.metric("NO2",comp['no2'])
 
 except:
-
-    st.warning("Unable to fetch live AQI data")
+    st.warning("API Error")
 
 # -------------------------
-# POLLUTION CONTRIBUTION
+# POLLUTION CHART
 # -------------------------
 
 st.subheader("Pollution Contribution")
@@ -203,111 +170,46 @@ pollution = pd.DataFrame({
 "Level":[pm25,pm10,no2,co,o3]
 })
 
-fig = px.bar(
-    pollution,
-    x="Pollutant",
-    y="Level",
-    color="Level",
-    color_continuous_scale="Turbo"
-)
-
+fig = px.bar(pollution,x="Pollutant",y="Level",color="Level")
 st.plotly_chart(fig,use_container_width=True)
 
 # -------------------------
-# MULTI-CITY MAP
+# MAP
 # -------------------------
 
-st.subheader("India Air Pollution Map")
+st.subheader("India Map")
 
-india_map = folium.Map(location=[22.5937,78.9629],zoom_start=5)
-
-city_aqi_demo = {
-"Delhi":251,
-"Mumbai":142,
-"Kolkata":142,
-"Chennai":110,
-"Bengaluru":97,
-"Hyderabad":112,
-"Ahmedabad":238,
-"Lucknow":212,
-"Patna":220,
-"Bhubaneswar":161
-}
-
-def get_color(aqi):
-
-    if aqi <= 50:
-        return "green"
-    elif aqi <= 100:
-        return "yellow"
-    elif aqi <= 200:
-        return "orange"
-    elif aqi <= 300:
-        return "red"
-    elif aqi <= 400:
-        return "purple"
-    else:
-        return "black"
+m = folium.Map(location=[22,78],zoom_start=5)
 
 for city in cities:
-
     lat,lon = cities[city]
-    aqi = city_aqi_demo[city]
+    folium.CircleMarker([lat,lon],radius=10,color="red",fill=True).add_to(m)
 
-    folium.CircleMarker(
-        location=[lat,lon],
-        radius=12,
-        popup=f"{city} AQI: {aqi}",
-        color=get_color(aqi),
-        fill=True,
-        fill_color=get_color(aqi)
-    ).add_to(india_map)
-
-st_folium(india_map,width=1200)
+st_folium(m,width=1200)
 
 # -------------------------
-# AI AQI FORECAST (7 DAYS)
+# FORECAST (FIXED)
 # -------------------------
 
-st.subheader("AI Air Pollution Forecast (Next 7 Days)")
+st.subheader("7-Day AQI Forecast")
 
-days = ["Day 1","Day 2","Day 3","Day 4","Day 5","Day 6","Day 7"]
-
-future_pm25 = [pm25 + np.random.uniform(-5,10) for _ in range(7)]
-future_pm10 = [pm10 + np.random.uniform(-5,10) for _ in range(7)]
-future_no2 = [no2 + np.random.uniform(-3,8) for _ in range(7)]
-future_co = [co + np.random.uniform(-0.2,0.5) for _ in range(7)]
-future_o3 = [o3 + np.random.uniform(-2,6) for _ in range(7)]
-
-forecast_aqi = []
+days = ["D1","D2","D3","D4","D5","D6","D7"]
+forecast = []
 
 for i in range(7):
 
-    input_data = pd.DataFrame([{
-        "PM2.5": future_pm25[i],
-        "PM10": future_pm10[i],
-        "NO2": future_no2[i],
-        "CO": future_co[i],
-        "O3": future_o3[i]
-    }])
+    sample = np.array([[pm25,pm10,no2,co,o3]])
 
-    pred = model.predict(input_data)[0]
-    forecast_aqi.append(pred)
+    if model is not None:
+        val = model.predict(sample)[0]
+    else:
+        val = np.mean(sample)
 
-forecast_df = pd.DataFrame({
-"Day":days,
-"AQI":forecast_aqi
-})
+    forecast.append(val + np.random.uniform(-10,10))
 
-# Chart
-fig = px.line(
-    forecast_df,
-    x="Day",
-    y="AQI",
-    markers=True,
-    title="Predicted AQI Trend (Next 7 Days)"
-)
+df = pd.DataFrame({"Day":days,"AQI":forecast})
 
+fig = px.line(df,x="Day",y="AQI",markers=True)
 st.plotly_chart(fig,use_container_width=True)
 
-st.dataframe(forecast_df)
+st.dataframe(df)
